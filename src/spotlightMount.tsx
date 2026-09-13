@@ -19,6 +19,8 @@ import { AppleSpotlight } from '@/components/ui/apple-spotlight';
 import { lookupIdentifier, type LookupResult } from '@/lib/idLookup';
 import { summarizeWeather } from '@/weatherWords.js';
 import { placeRouteSummary } from '@/routeSummaryPlacement.js';
+import { applyPickedPlace } from '@/placeDots.js';
+import { createPlaceDots } from '@/placeDotsLayer.js';
 import '@/tailwind.css';
 
 /**
@@ -208,6 +210,14 @@ function occupiedBounds(container: HTMLElement | null) {
 interface RouteBarProps {
   destination: GeocodeRow | null;
   onClose: () => void;
+  /**
+   * Where the host sends a place the operator clicked on the map while this is
+   * open. The bar installs its handler here and takes it away on close, so a
+   * click with no route being planned goes back to meaning "show me this place".
+   */
+  pickRef: React.MutableRefObject<((row: GeocodeRow) => void) | null>;
+  /** Search dots are on the map, so clicking one is worth suggesting. */
+  hasDots: boolean;
 }
 
 /**
@@ -224,12 +234,20 @@ interface RouteBarProps {
  * its listener; moving a node keeps everything attached to it, and the nodes go
  * home when this closes.
  */
-function RouteBar({ destination, onClose }: RouteBarProps) {
+function RouteBar({ destination, onClose, pickRef, hasDots }: RouteBarProps) {
   const [origin, setOrigin] = useState('');
   const [dest, setDest] = useState(destination ? destination.label.split(',')[0].trim() : '');
   const originPointRef = useRef<{ lat: number; lon: number } | null>(null);
   const destPointRef = useRef<{ lat: number; lon: number } | null>(
     destination ? { lat: destination.lat, lon: destination.lon } : null
+  );
+  /*
+   * Which end a clicked place fills. Opened from RUTE KE SINI the destination
+   * is already known, so the next click is the start; opened empty, it is the
+   * destination - the thing a person usually has in mind first.
+   */
+  const [activeField, setActiveField] = useState<'origin' | 'destination'>(
+    destination ? 'origin' : 'destination'
   );
   const hostRef = useRef<HTMLDivElement>(null);
 
@@ -381,14 +399,53 @@ function RouteBar({ destination, onClose }: RouteBarProps) {
     destPointRef.current = heldOrigin;
     setOrigin(dest);
     setDest(origin);
+    setActiveField((field) => (field === 'origin' ? 'destination' : 'origin'));
   };
 
-  const run = () => {
-    fillPanelField('route-origin', origin, originPointRef.current);
-    fillPanelField('route-dest', dest, destPointRef.current);
+  /*
+   * Run with explicit values rather than reading state.
+   *
+   * A clicked place sets the field AND runs in the same moment, and React state
+   * set in that moment is not readable until the next render - reading it here
+   * would route from the previous start to the previous destination.
+   */
+  const runWith = (
+    originText: string,
+    originPoint: { lat: number; lon: number } | null,
+    destText: string,
+    destPoint: { lat: number; lon: number } | null,
+  ) => {
+    fillPanelField('route-origin', originText, originPoint);
+    fillPanelField('route-dest', destText, destPoint);
     // No mode to forward any more: the panel holds 'car' and nothing changes it.
     panelEl<HTMLButtonElement>('route-search-btn')?.click();
   };
+  const run = () => runWith(origin, originPointRef.current, dest, destPointRef.current);
+
+  /* The latest of everything a map click needs, without re-installing the handler per keystroke. */
+  const latestRef = useRef({ origin, dest, activeField });
+  latestRef.current = { origin, dest, activeField };
+
+  useEffect(() => {
+    pickRef.current = (row: GeocodeRow) => {
+      const now = latestRef.current;
+      const next = applyPickedPlace({
+        activeField: now.activeField,
+        origin: { text: now.origin, point: originPointRef.current },
+        destination: { text: now.dest, point: destPointRef.current },
+      }, row);
+      originPointRef.current = next.origin.point;
+      destPointRef.current = next.destination.point;
+      setOrigin(next.origin.text);
+      setDest(next.destination.text);
+      setActiveField(next.activeField);
+      // Both ends known: the travel time is the answer, so go and get it.
+      if (next.run) {
+        runWith(next.origin.text, next.origin.point, next.destination.text, next.destination.point);
+      }
+    };
+    return () => { pickRef.current = null; };
+  }, [pickRef]);
 
   return (
     <div className="mm-routebar">
@@ -397,6 +454,8 @@ function RouteBar({ destination, onClose }: RouteBarProps) {
         <input
           value={origin}
           placeholder="Titik awal, atau pakai GPS"
+          data-active={activeField === 'origin'}
+          onFocus={() => setActiveField('origin')}
           onChange={(event) => { originPointRef.current = null; setOrigin(event.target.value); }}
           onKeyDown={(event) => { if (event.key === 'Enter') run(); }}
         />
@@ -422,9 +481,21 @@ function RouteBar({ destination, onClose }: RouteBarProps) {
         <input
           value={dest}
           placeholder="Tujuan"
+          data-active={activeField === 'destination'}
+          onFocus={() => setActiveField('destination')}
           onChange={(event) => { destPointRef.current = null; setDest(event.target.value); }}
           onKeyDown={(event) => { if (event.key === 'Enter') run(); }}
         />
+      </div>
+
+      {/*
+        Say what a click on the map will do, and to which box. The highlighted
+        field is the same one this names, so the two can never disagree.
+      */}
+      <div className="mm-routebar-hint">
+        {hasDots
+          ? `Klik titik merah di peta untuk mengisi ${activeField === 'origin' ? 'DARI' : 'KE'}.`
+          : `Cari tempat di kolom Search, lalu klik titiknya di peta untuk mengisi ${activeField === 'origin' ? 'DARI' : 'KE'}.`}
       </div>
 
       {/*
@@ -499,6 +570,39 @@ function SpotlightHost() {
   const pendingQueryRef = useRef<string>('');
   const abortRef = useRef<AbortController | null>(null);
 
+  /*
+   * Search results as clickable dots on the map.
+   *
+   * The dots belong to the last search that ANSWERED, not to whatever is in the
+   * field: the bar clears its own text after a pick, and clearing the dots with
+   * it would take away every other place at the exact moment someone wants to
+   * compare them. A new answer replaces them; HAPUS PENANDA takes them away.
+   */
+  const dotsRef = useRef<ReturnType<typeof createPlaceDots> | null>(null);
+  const dotRowsRef = useRef<GeocodeRow[]>([]);
+  const [dotCount, setDotCount] = useState(0);
+  /** Installed by the route bar while it is open: a clicked place fills a field instead. */
+  const routePickRef = useRef<((row: GeocodeRow) => void) | null>(null);
+  /** What a click on a dot does when no route is being planned. Set below, read at click time. */
+  const chooseRowRef = useRef<(row: GeocodeRow) => void>(() => {});
+
+  const placeRow = useCallback((row: GeocodeRow | undefined) => {
+    if (!row) return;
+    if (routePickRef.current) routePickRef.current(row);
+    else chooseRowRef.current(row);
+  }, []);
+
+  const showDots = useCallback((rows: GeocodeRow[]) => {
+    const viewer = (window as any).__mapMonitoring?.viewer;
+    if (!dotsRef.current && viewer && rows.length) {
+      dotsRef.current = createPlaceDots(viewer, {
+        onPick: (index) => placeRow(dotRowsRef.current[index]),
+      });
+    }
+    dotRowsRef.current = rows;
+    setDotCount(dotsRef.current ? dotsRef.current.show(rows) : 0);
+  }, [placeRow]);
+
   const search = useCallback(async (text: string) => {
     const viewer = (window as any).__mapMonitoring?.viewer;
     abortRef.current?.abort();
@@ -511,6 +615,7 @@ function SpotlightHost() {
       );
       if (!response.ok) {
         setResults([]);
+        showDots([]);
         setEmptyMessage('Pencarian tidak tersedia.');
         return;
       }
@@ -519,6 +624,7 @@ function SpotlightHost() {
         (row: GeocodeRow) => Number.isFinite(row.lat) && Number.isFinite(row.lon)
       );
       rowsRef.current = rows;
+      showDots(rows);
       setResults(
         rows.slice(0, 8).map((row) => {
           const parts = String(row.label || '').split(',').map((part) => part.trim());
@@ -549,9 +655,10 @@ function SpotlightHost() {
     } catch (error: any) {
       if (error?.name === 'AbortError') return;
       setResults([]);
+      showDots([]);
       setEmptyMessage('Pencarian gagal. Periksa koneksi.');
     }
-  }, []);
+  }, [showDots]);
 
   const onSearchChange = useCallback(
     (value: string) => {
@@ -650,6 +757,19 @@ function SpotlightHost() {
     }
   }, []);
 
+  /**
+   * Make a place the chosen one: pin it and open its card.
+   *
+   * No camera move. A dot is clicked because it is already on screen, and
+   * flying to something the operator is looking at only makes them find it
+   * again. Picking from the LIST still flies - that row may be off screen.
+   */
+  const chooseRow = useCallback((row: GeocodeRow) => {
+    void markSearchResult(row);
+    setChosen(row);
+  }, [markSearchResult]);
+  chooseRowRef.current = chooseRow;
+
   const flyToRow = useCallback((row: GeocodeRow | undefined) => {
     const viewer = (window as any).__mapMonitoring?.viewer;
     if (!row || !viewer) return;
@@ -685,9 +805,8 @@ function SpotlightHost() {
         duration: 2.4
       }
     );
-    void markSearchResult(row);
-    setChosen(row);
-  }, [markSearchResult]);
+    chooseRow(row);
+  }, [chooseRow]);
 
   /** Take the pin back and forget the place, leaving the bar as it started. */
   const clearChosen = useCallback(() => {
@@ -695,12 +814,27 @@ function SpotlightHost() {
     const id = searchMarkRef.current;
     searchMarkRef.current = null;
     if (id && api?.removeById) api.removeById(id);
+    dotsRef.current?.clear();
+    dotRowsRef.current = [];
+    setDotCount(0);
     setChosen(null);
     setRouteOpen(false);
   }, []);
 
+  /*
+   * Stable, because the route bar's effect depends on it. A fresh arrow per
+   * render re-ran that effect on every host render - moving the report out of
+   * the panel and back, and rebuilding its card - and a dot click is a host
+   * render.
+   */
+  const closeRoute = useCallback(() => setRouteOpen(false), []);
+
   const onSelectResult = useCallback(
-    (_result: any, index: number) => flyToRow(rowsRef.current[index]),
+    (_result: any, index: number) => {
+      const row = rowsRef.current[index];
+      if (routePickRef.current) routePickRef.current(row);
+      else flyToRow(row);
+    },
     [flyToRow]
   );
 
@@ -717,12 +851,17 @@ function SpotlightHost() {
       window.clearTimeout(debounceRef.current);
       await search(pending);
     }
-    flyToRow(rowsRef.current[0]);
+    const first = rowsRef.current[0];
+    // While a route is being planned, Enter fills the active end like a click.
+    if (routePickRef.current && first) routePickRef.current(first);
+    else flyToRow(first);
   }, [flyToRow, search]);
 
   useEffect(() => () => {
     window.clearTimeout(debounceRef.current);
     abortRef.current?.abort();
+    dotsRef.current?.destroy();
+    dotsRef.current = null;
   }, []);
 
   return (
@@ -737,7 +876,12 @@ function SpotlightHost() {
       emptyMessage={emptyMessage}
       panel={
         routeOpen ? (
-          <RouteBar destination={chosen} onClose={() => setRouteOpen(false)} />
+          <RouteBar
+            destination={chosen}
+            onClose={closeRoute}
+            pickRef={routePickRef}
+            hasDots={dotCount > 0}
+          />
         ) : lookup ? (
           <LookupCard result={lookup} onClose={() => setLookup(null)} />
         ) : chosen ? (

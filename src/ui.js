@@ -6737,7 +6737,12 @@ export class StyleManager {
     if (!resultEl) return;
     const rows = [];
     const duration = formatDuration(mark.durationS);
-    rows.push(`<div class="route-headline"><strong>${formatKm(mark.distanceM || 0)}</strong>${duration ? `<span>${duration}</span>` : ''}</div>`);
+    // Time first when there is one: "how long will it take" is the question a
+    // route is asked, and distance is the supporting detail. A straight-line
+    // fallback has no time, so it leads with the distance it does have.
+    rows.push(duration
+      ? `<div class="route-headline"><strong>${duration}</strong><span>${formatKm(mark.distanceM || 0)}</span></div>`
+      : `<div class="route-headline"><strong>${formatKm(mark.distanceM || 0)}</strong></div>`);
 
     if (mark.fallback) {
       // A straight line is not a route, and must never be presented as one.

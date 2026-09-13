@@ -495,6 +495,20 @@
   border-color: rgba(0, 0, 0, 0.34);
 }
 
+/* The end a click on the map will fill. Named in the hint underneath too, so
+   the highlight is never the only way to tell. */
+#spotlight-root .mm-routebar input[data-active='true'] {
+  border-color: #1a73e8;
+  box-shadow: 0 0 0 2px rgba(26, 115, 232, 0.18);
+}
+
+#spotlight-root .mm-routebar-hint {
+  margin: -2px 0 6px 40px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: #6b7280;
+}
+
 #spotlight-root .mm-chosen button,
 #spotlight-root .mm-routebar button {
   flex: 0 0 auto;
@@ -561,6 +575,14 @@
 :is(#spotlight-root .mm-routebar-output, .mm-route-summary) .route-headline strong,
 :is(#spotlight-root .mm-routebar-output, .mm-route-summary) .route-info-strong {
   color: #111318;
+}
+
+/* The travel time beside the distance. It kept the dark panel's pale grey, which
+   on this light card was close to invisible - the one number the report exists
+   to give was the hardest one to read. */
+:is(#spotlight-root .mm-routebar-output, .mm-route-summary) .route-headline span {
+  color: #374151;
+  font-weight: 600;
 }
 
 :is(#spotlight-root .mm-routebar-output, .mm-route-summary) .route-info-card {
