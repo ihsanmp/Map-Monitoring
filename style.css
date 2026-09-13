@@ -4265,8 +4265,9 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
 
 .draw-shape {
   display: flex;
-  flex-direction: column;
-  gap: 3px;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 7px;
   padding: 8px;
   text-align: left;
   border: 1px solid rgba(255, 255, 255, 0.12);
@@ -4288,6 +4289,35 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
   background: rgba(0, 212, 255, 0.14);
 }
 
+.draw-shape-icon {
+  flex: 0 0 auto;
+  width: 13px;
+  height: 13px;
+  margin-top: 1px;
+  color: var(--text-secondary);
+}
+
+.draw-shape-icon svg {
+  width: 100%;
+  height: 100%;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.draw-shape[aria-pressed='true'] .draw-shape-icon {
+  color: var(--accent);
+}
+
+.draw-shape-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
 .draw-shape-label {
   color: var(--text-primary);
   font-family: var(--font-mono);
@@ -4307,6 +4337,84 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
   font-size: 10px;
   line-height: 1.4;
   min-height: 2.2em;
+}
+
+/* The shape being drawn, inside the panel: points so far, the live number, and
+   the keys. The same facts as the action bar, for someone looking at the panel. */
+.draw-live {
+  margin-top: 8px;
+  padding: 7px 9px;
+  border: 1px solid rgba(34, 211, 238, 0.35);
+  border-radius: 6px;
+  background: rgba(34, 211, 238, 0.07);
+}
+
+.draw-live-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.draw-live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.draw-live-measure {
+  margin-left: auto;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.draw-live-keys {
+  margin-top: 4px;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  line-height: 1.5;
+}
+
+/* Finished shapes, newest first. The left bar is the shape's own colour on the
+   map, so a row and its outline are matched by eye. */
+.draw-list {
+  list-style: none;
+  margin: 10px -2px 0;
+  padding: 0;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.draw-list:empty {
+  display: none;
+}
+
+.draw-list-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 7px 10px;
+  border-left: 2px solid var(--draw-kind, var(--accent));
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.draw-list-name {
+  color: var(--text-primary);
+  font-size: 11px;
+}
+
+.draw-list-meta {
+  display: flex;
+  justify-content: space-between;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
 }
 
 .draw-inside {
@@ -4342,6 +4450,124 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
 .draw-action:hover {
   color: var(--text-primary);
   border-color: rgba(0, 212, 255, 0.5);
+}
+
+.draw-action:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.draw-action-export {
+  border-color: rgba(34, 211, 238, 0.35);
+  color: var(--accent);
+}
+
+/* Red, because it is the one button on the panel that throws work away. */
+.draw-action-clear {
+  border-color: rgba(255, 77, 109, 0.35);
+  color: #ff8095;
+}
+
+.draw-action-clear:hover {
+  border-color: #ff4d6d;
+  color: #ffb3c0;
+}
+
+/* ------------------------------------------------------------------ *
+ * Drawing action bar — over the map, where the eyes are while drawing.
+ *
+ * Positioned from script just below the search bar, which owns the top centre
+ * and changes height with whatever it is showing. Everything the operator needs
+ * mid-shape is here: which tool, what to click, the live measurement, and a way
+ * out that does not require finding the side panel.
+ * ------------------------------------------------------------------ */
+.draw-actionbar {
+  position: fixed;
+  top: 88px;
+  left: 50%;
+  z-index: 148; /* under the search bar (150) and the route card (149) */
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 14px;
+  max-width: calc(100vw - 32px);
+  border: 1px solid color-mix(in srgb, var(--draw-kind, #22d3ee) 45%, transparent);
+  border-radius: 10px;
+  background: rgba(8, 12, 18, 0.92);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  pointer-events: auto;
+}
+
+.draw-actionbar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.draw-actionbar-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--draw-kind, #22d3ee);
+}
+
+.draw-actionbar-mode {
+  color: var(--draw-kind, #22d3ee);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+}
+
+.draw-actionbar-prompt {
+  font-size: 13px;
+}
+
+.draw-actionbar-measure {
+  padding-left: 10px;
+  border-left: 1px solid rgba(255, 255, 255, 0.14);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.draw-actionbar button {
+  padding: 5px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.draw-actionbar button:hover:not(:disabled) {
+  color: var(--text-primary);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.draw-actionbar button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.draw-actionbar .draw-actionbar-finish {
+  border-color: rgba(74, 222, 128, 0.5);
+  background: rgba(74, 222, 128, 0.1);
+  color: #86efac;
+}
+
+.draw-actionbar-points {
+  margin-left: auto;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 10px;
 }
 
 /* ------------------------------------------------------------------ *
