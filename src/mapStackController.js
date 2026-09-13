@@ -32,9 +32,42 @@ export const MAP_STACKS = [
     kind: 'osm',
     requiresIon: false,
   },
+  /*
+   * A dark street map, beside the others rather than instead of any of them.
+   *
+   * The map that lets what this console draws on top - CCTV dots, drawn areas,
+   * a route line - carry the picture, instead of competing with a bright street
+   * map for it.
+   *
+   * Esri's World Dark Gray canvas: roads light on charcoal, with street names
+   * as a separate transparent layer on top. NOT CARTO Dark Matter, which is the
+   * obvious choice and was tried first - CARTO now stamps every keyless tile
+   * with "API KEY REQUIRED" whatever the referer, which put the words across
+   * every street in Yogyakarta.
+   */
+  {
+    id: 'dark',
+    label: 'Dark',
+    shortLabel: 'DARK',
+    kind: 'esri-dark',
+    requiresIon: false,
+  },
 ];
 
 const DEFAULT_OSM_CREDIT = '© OpenStreetMap contributors';
+const ESRI_DARK_CREDIT = 'Esri, HERE, Garmin, © OpenStreetMap contributors, and the GIS user community';
+/** Esri tile services order the path z/y/x, not z/x/y. */
+const ESRI_DARK_BASE_URL = 'https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}';
+const ESRI_DARK_LABELS_URL = 'https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}';
+/**
+ * The deepest zoom with real data.
+ *
+ * Measured over Yogyakarta: zoom 16 is a real tile; 17, 18 and 19 are one
+ * identical grey "Map data not yet available" image. Capping here makes Cesium
+ * stretch the zoom-16 tile when the camera is closer, which is a softer street
+ * map rather than a grey placard over the city.
+ */
+const ESRI_DARK_MAX_LEVEL = 16;
 
 // Keyless global ellipsoidal terrain (Re:Earth Terrain / Mapterhorn, CC BY 4.0,
 // EGM2008 geoid via NGA) — quantized-mesh 1.0, `ellipsoid` data-type. Fixes
@@ -64,6 +97,8 @@ export class MapStackController {
     this._onError = onError;
     this._activeId = googleTileset ? initialStack : 'osm';
     this._imageryLayer = null;
+    /** A second, transparent layer some stacks draw on top - the dark map's street names. */
+    this._overlayLayer = null;
     this._imageryProviders = new Map();
     this._isSwitching = false;
     this._lastError = null;
@@ -243,6 +278,14 @@ export class MapStackController {
     this._imageryLayer = new Cesium.ImageryLayer(provider);
     this.viewer.imageryLayers.add(this._imageryLayer, 0);
 
+    // Directly above the base, so street names sit on the map and below
+    // anything a layer drapes over it.
+    const overlay = this._getOverlayProvider(stack);
+    if (overlay) {
+      this._overlayLayer = new Cesium.ImageryLayer(overlay);
+      this.viewer.imageryLayers.add(this._overlayLayer, 1);
+    }
+
     if (this.googleTileset) this.googleTileset.show = false;
     this.viewer.scene.globe.show = true;
     await this._setWorldTerrainEnabled(!!this.cesiumToken, gen);
@@ -261,6 +304,12 @@ export class MapStackController {
         url: 'https://tile.openstreetmap.org/',
         credit: DEFAULT_OSM_CREDIT,
       });
+    } else if (stack.kind === 'esri-dark') {
+      provider = new Cesium.UrlTemplateImageryProvider({
+        url: ESRI_DARK_BASE_URL,
+        maximumLevel: ESRI_DARK_MAX_LEVEL,
+        credit: ESRI_DARK_CREDIT,
+      });
     } else {
       throw new Error(`Unsupported map stack: ${stack.id}`);
     }
@@ -269,7 +318,31 @@ export class MapStackController {
     return provider;
   }
 
+  /**
+   * The transparent layer a stack draws over its base, or null.
+   * Cached like the base providers, so switching back and forth refetches nothing.
+   * @param {object} stack
+   * @returns {Cesium.ImageryProvider|null}
+   */
+  _getOverlayProvider(stack) {
+    if (stack?.kind !== 'esri-dark') return null;
+    const key = `${stack.id}:overlay`;
+    if (!this._imageryProviders.has(key)) {
+      this._imageryProviders.set(key, new Cesium.UrlTemplateImageryProvider({
+        url: ESRI_DARK_LABELS_URL,
+        maximumLevel: ESRI_DARK_MAX_LEVEL,
+        // Same credit as the base; saying it twice in the credit bar is noise.
+      }));
+    }
+    return this._imageryProviders.get(key);
+  }
+
   _removeImageryLayer() {
+    // The overlay belongs to whichever stack drew it, so it always goes with the base.
+    if (this._overlayLayer) {
+      this.viewer.imageryLayers.remove(this._overlayLayer, false);
+      this._overlayLayer = null;
+    }
     if (!this._imageryLayer) return;
     this.viewer.imageryLayers.remove(this._imageryLayer, false);
     this._imageryLayer = null;

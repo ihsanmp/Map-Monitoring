@@ -207,7 +207,7 @@ export function createCableOverlayPublisher({
  * real `MAP_STACKS` so the omission is caught loudly.
  */
 const CABLE_GLOBE_STACK_IDS = Object.freeze(
-  new Set(['bing-aerial', 'bing-labels', 'osm']),
+  new Set(['bing-aerial', 'bing-labels', 'osm', 'dark']),
 );
 
 /**

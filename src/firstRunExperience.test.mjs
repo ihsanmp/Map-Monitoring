@@ -673,6 +673,10 @@ test('the voice TOOL SCHEMA is byte-identical to main — the mission mapping is
    * name. Re-freezing is the correct response to an INTENDED schema change; the
    * guard earns its keep by forcing exactly this note to be written instead of
    * letting the edit pass unremarked.
+   *
+   * Re-frozen again for the dark basemap: `set_map_stack`'s enum gained 'dark'.
+   * The block grew by exactly the eight bytes of `, 'dark'` - 34186 to 34194 -
+   * and no mission tool moved.
    */
   const src = fs.readFileSync(new URL('../vite.config.js', import.meta.url), 'utf8');
   const declaration = src.indexOf('const MM_REALTIME_TOOLS = [');
@@ -681,10 +685,10 @@ test('the voice TOOL SCHEMA is byte-identical to main — the mission mapping is
   const end = src.indexOf('\n];\n', start);
   const block = src.slice(start, end + 4);
 
-  assert.equal(block.length, 34186, 'tool schema byte length drifted from the frozen baseline');
+  assert.equal(block.length, 34194, 'tool schema byte length drifted from the frozen baseline');
   assert.equal(
     crypto.createHash('sha256').update(block).digest('hex'),
-    '8747498895c30e53aa06a25659325b5dfccd3954cfe635d924362f78aafc1d4d',
+    'd95df36b17f1d16e5d657af773f34fdddad2969af2991a1fb4a99f574af1c11a',
     'the first-run missions must ride EXISTING tools: no schema edit, no cache bust',
   );
 

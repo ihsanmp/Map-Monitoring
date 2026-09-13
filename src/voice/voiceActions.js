@@ -217,6 +217,13 @@ const STACK_ALIASES = new Map([
   ['road', 'osm'],
   ['roads', 'osm'],
   ['road map', 'osm'],
+  // The dark basemap. NOT "night vision" or "night": those are visual STYLES,
+  // and the session instructions keep that distinction explicit.
+  ['dark', 'dark'],
+  ['dark map', 'dark'],
+  ['dark matter', 'dark'],
+  ['gelap', 'dark'],
+  ['peta gelap', 'dark'],
 ]);
 
 /** Search order for track_entity across entity layer families. */

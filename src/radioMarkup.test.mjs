@@ -174,7 +174,12 @@ test('no unchanged Realtime tool definition drifts silently', () => {
   // and `get_place_weather` are new; `annotate_map`'s route mode now defaults to
   // driving rather than walking (the route panel is car-only); and four
   // descriptions picked up the Map Monitoring rename the original sweep missed.
+  //
+  // Then: `set_map_stack` gained `dark`, the new dark street map. An addition to
+  // its enum and nothing else - the other 20 tools were checked to hash the same
+  // with and without this change before the digest was re-derived.
   const TOUCHED = new Set([
+    'set_map_stack',
     'control_cctv',
     'check_place_hours',
     'get_place_weather',
@@ -188,12 +193,12 @@ test('no unchanged Realtime tool definition drifts silently', () => {
   const unchanged = realtimeTools()
     .filter((tool) => !TOUCHED.has(tool.name))
     .sort((a, b) => a.name.localeCompare(b.name));
-  assert.equal(unchanged.length, 21);
+  assert.equal(unchanged.length, 20);
   const digest = createHash('sha256')
     .update(JSON.stringify(unchanged))
     .digest('hex')
     .slice(0, 16);
-  assert.equal(digest, 'ca660eeb22ae31e5', 'an unchanged Realtime tool definition drifted');
+  assert.equal(digest, '66d2a605fdbfaf9d', 'an unchanged Realtime tool definition drifted');
 });
 
 test('Radio volume and mission speed share the Sharpen slider visual language', () => {
