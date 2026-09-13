@@ -1,6 +1,7 @@
 import * as Cesium from 'cesium';
 import { holdContinuousRender, releaseContinuousRender } from '../renderGovernor.js';
 import { isRateLimitedOutcome, resolveAnnotationTarget } from './annotationResolver.js';
+import { normalizeRouteMode } from './routeMode.js';
 
 // Dev convenience: expose the app's Cesium instance for console/preview probing
 // (single shared module instance — avoids dual-Cesium state bugs when testing).
@@ -417,7 +418,14 @@ export function createAnnotationEngine({
         throw err;
       }
       // Real street-following route (OSM/OSRM), mode-aware.
-      const mode = normalizeMode(spec.mode);
+      /*
+       * An unstated mode is DRIVING, not walking.
+       *
+       * The pedestrian profile ignores one-way restrictions, so a route that
+       * defaulted to it was drawn straight up streets whose traffic runs the
+       * other way. See routeMode.js for the measurements.
+       */
+      const mode = normalizeRouteMode(spec.mode);
       const prefer = spec.prefer === 'main' ? 'main' : 'fastest';
       const routed = await fetchRoute(resolvedPts.map((p) => [p.lon, p.lat]), mode, signal, prefer);
       if (routed) {
@@ -970,7 +978,9 @@ export function createAnnotationEngine({
       await wait(2800);
       await annotate([{ type: 'pin', target: 'Letterman Digital Arts Center, San Francisco', label: 'ILM / Lucasfilm', color: 'red' }], { persist: true });
       await wait(2600);
-      await annotate([{ type: 'route', color: 'amber', label: 'Crissy Field shoreline', points: [
+      // Explicitly on foot: this follows the shoreline path, not the roads, and
+      // an unstated mode now means driving.
+      await annotate([{ type: 'route', mode: 'foot', color: 'amber', label: 'Crissy Field shoreline', points: [
         { target: 'Palace of Fine Arts, San Francisco' },
         { target: 'Crissy Field, San Francisco' },
         { target: 'Fort Point, San Francisco' },
@@ -1129,13 +1139,6 @@ function cleanLabel(label) {
 
 function round5(n) {
   return Number.isFinite(n) ? Math.round(n * 1e5) / 1e5 : null;
-}
-
-function normalizeMode(m) {
-  const t = String(m || '').toLowerCase();
-  if (t === 'car' || t === 'drive' || t === 'driving') return 'car';
-  if (t === 'bike' || t === 'cycle' || t === 'cycling' || t === 'bicycle') return 'bike';
-  return 'foot';
 }
 
 /** Fetch a real street-following route from the /api/route proxy (OSM/OSRM). */
