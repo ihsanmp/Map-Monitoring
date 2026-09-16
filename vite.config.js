@@ -2768,6 +2768,16 @@ const NOMINATIM_MAX_QUERY_CHARS = 200;
 const NOMINATIM_CANDIDATES = 8;
 /** Metro-sized floor (~44 km) for the viewport bias box. See parseGeocodeBias. */
 const GEOCODE_BIAS_MIN_SPAN_DEG = 0.4;
+/*
+ * How much world a `near` point stands for, when the view itself is unusable.
+ *
+ * `near` is not a sighting - it only says the camera is over this point - so the
+ * box built from it is deliberately country-sized rather than street-sized. Wide
+ * enough to cover the archipelago the opening view is pointed at, narrow enough
+ * that Nominatim still prefers it: measured, ±12° over the Makassar Strait is
+ * what turns "uii" from an airport in Honduras into Universitas Islam Indonesia.
+ */
+const GEOCODE_NEAR_SPAN_DEG = 24;
 /**
  * Nominatim importance below which a viewport-biased result set is treated as
  * having found nothing that matters, triggering one unbiased retry.
@@ -2788,6 +2798,33 @@ let _nominatimLastCallAt = 0;
  * @param {string} raw
  * @returns {number[]|null} Null when absent or malformed — bias is optional.
  */
+/**
+ * A "lat,lon" the camera is over, as a search box.
+ *
+ * NAME SEARCHES ONLY. A category search ("kafe", "spbu") is answered by a radius
+ * on the ground, and the camera point is not a place the operator can see: at
+ * the opening view it sits in the Makassar Strait, where a radius search would
+ * report that Indonesia has no cafes. That search keeps asking to be zoomed in.
+ *
+ * @param {string} raw
+ * @returns {Array<number>|null} [south, west, north, east], or null.
+ */
+export function parseGeocodeNear(raw) {
+  const parts = String(raw || '').split(',');
+  if (parts.length !== 2) return null;
+  const lat = Number(parts[0]);
+  const lon = Number(parts[1]);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  if (Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
+  const half = GEOCODE_NEAR_SPAN_DEG / 2;
+  return [
+    Math.max(lat - half, -90),
+    Math.max(lon - half, -180),
+    Math.min(lat + half, 90),
+    Math.min(lon + half, 180),
+  ];
+}
+
 export function parseGeocodeBias(raw) {
   const parts = String(raw || '').split('|');
   if (parts.length !== 2) return null;
@@ -3491,10 +3528,28 @@ function nominatimProxy() {
           // Viewport bias, in the same "swLat,swLng|neLat,neLng" shape the Google
           // path already builds via viewportBias(). Without it "Malioboro" resolves
           // to a street in Surabaya while the user is looking straight at Yogyakarta.
-          const rawBias = new URL(req.url, 'http://localhost').searchParams.get('bias') || '';
+          const geocodeParams = new URL(req.url, 'http://localhost').searchParams;
+          const rawBias = geocodeParams.get('bias') || '';
+          const rawNear = geocodeParams.get('near') || '';
           const box = parseGeocodeBias(rawBias);
+          /*
+           * Only the NAME search gets the camera-point fallback. `box` stays
+           * null for the category path below, which needs a real view and says
+           * so rather than searching the sea the camera happens to be over.
+           */
+          const nameBox = box || parseGeocodeNear(rawNear);
 
-          const cacheKey = `${query.toLowerCase()}::${box ? box.join(',') : 'global'}`;
+          /*
+           * Keyed on the box the NAME search will actually use.
+           *
+           * Keying on `box` alone conflated two different questions: a search
+           * placed by the camera point and an unplaced one shared a single
+           * 'global' entry, so whichever ran first answered both. Measured while
+           * building this: "uny" placed over Indonesia returned the Council of
+           * the European Union, because an earlier unplaced "uny" had already
+           * cached it.
+           */
+          const cacheKey = `${query.toLowerCase()}::${nameBox ? nameBox.join(',') : 'global'}`;
           const hit = _nominatimCache.get(cacheKey);
           if (hit && Date.now() - hit.at < NOMINATIM_CACHE_TTL_MS) {
             return send(200, { source: hit.source || 'CACHE', results: hit.results });
@@ -3571,15 +3626,15 @@ function nominatimProxy() {
           // only while no on-screen hit has been found.
           let results = [];
           const variantsTried = [];
-          for (const variant of geocodeQueryVariants(query, box)) {
+          for (const variant of geocodeQueryVariants(query, nameBox)) {
             variantsTried.push(variant);
             const wait = NOMINATIM_MIN_INTERVAL_MS - (Date.now() - _nominatimLastCallAt);
             if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
             _nominatimLastCallAt = Date.now();
 
-            const found = await queryNominatim(variant, box);
+            const found = await queryNominatim(variant, nameBox);
             results = results.concat(found);
-            if (results.some((row) => inGeocodeBox(row, box))) break;
+            if (results.some((row) => inGeocodeBox(row, nameBox))) break;
           }
 
           // A viewbox does not merely re-rank at Nominatim - it can DROP the
@@ -3594,7 +3649,7 @@ function nominatimProxy() {
           // that already found something important (a city, a major landmark)
           // has no need of it.
           const bestImportance = results.reduce((max, row) => Math.max(max, Number(row.importance) || 0), 0);
-          if (box && bestImportance < GEOCODE_WEAK_IMPORTANCE) {
+          if (nameBox && bestImportance < GEOCODE_WEAK_IMPORTANCE) {
             const wait = NOMINATIM_MIN_INTERVAL_MS - (Date.now() - _nominatimLastCallAt);
             if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
             _nominatimLastCallAt = Date.now();

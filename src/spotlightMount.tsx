@@ -19,6 +19,7 @@ import { AppleSpotlight } from '@/components/ui/apple-spotlight';
 import { lookupIdentifier, type LookupResult } from '@/lib/idLookup';
 import { summarizeWeather } from '@/weatherWords.js';
 import { placeRouteSummary } from '@/routeSummaryPlacement.js';
+import { searchLocality } from '@/searchLocality.js';
 import { applyPickedPlace } from '@/placeDots.js';
 import { createPlaceDots } from '@/placeDotsLayer.js';
 import '@/tailwind.css';
@@ -76,31 +77,34 @@ function iconFor(osmType: string | undefined) {
   return <MapPin />;
 }
 
-/** The viewport box the geocoder ranks against, in the app's own bias format. */
-function viewportBias(viewer: any): string | null {
+/**
+ * Where the map is, for the geocoder: a view box when there is one, and
+ * otherwise the point the camera is over.
+ *
+ * The fallback is the whole point. From the opening view - 4,200 km up -
+ * `computeViewRectangle()` returns the entire globe, which is not a place. That
+ * used to mean the first search anyone ran carried no location at all, and was
+ * answered from a worldwide name index: "uii" came back as an airport in
+ * Honduras. The camera still knows which part of the world it is pointed at.
+ * searchLocality.js decides which of the two claims can be made.
+ */
+function mapLocality(viewer: any): { bias: string | null; near: string | null } {
   try {
     const rect = viewer?.camera?.computeViewRectangle?.();
-    if (!rect) return null;
-    const parts = [
-      Cesium.Math.toDegrees(rect.south).toFixed(4),
-      Cesium.Math.toDegrees(rect.west).toFixed(4),
-      Cesium.Math.toDegrees(rect.north).toFixed(4),
-      Cesium.Math.toDegrees(rect.east).toFixed(4)
-    ];
-    if (parts.some((value) => value === 'NaN')) return null;
-    /*
-     * A rectangle that covers the planet is not a bias.
-     *
-     * From high enough up - and the console now opens at 4,200 km -
-     * computeViewRectangle returns the whole globe, -90,-180 to 90,180. Sending
-     * that tells the server a viewport exists when none usefully does. Better
-     * to send nothing and let it answer as an unbiased search.
-     */
-    const span = Math.abs(rect.east - rect.west) + Math.abs(rect.north - rect.south);
-    if (span > Cesium.Math.toRadians(300)) return null;
-    return `${parts[0]},${parts[1]}|${parts[2]},${parts[3]}`;
+    const view = rect ? {
+      south: Cesium.Math.toDegrees(rect.south),
+      west: Cesium.Math.toDegrees(rect.west),
+      north: Cesium.Math.toDegrees(rect.north),
+      east: Cesium.Math.toDegrees(rect.east)
+    } : null;
+    const carto = viewer?.camera?.positionCartographic;
+    const camera = carto ? {
+      lat: Cesium.Math.toDegrees(carto.latitude),
+      lon: Cesium.Math.toDegrees(carto.longitude)
+    } : null;
+    return searchLocality({ view, camera });
   } catch {
-    return null;
+    return { bias: null, near: null };
   }
 }
 
@@ -607,10 +611,13 @@ function SpotlightHost() {
     const viewer = (window as any).__mapMonitoring?.viewer;
     abortRef.current?.abort();
     abortRef.current = new AbortController();
-    const bias = viewportBias(viewer);
+    const { bias, near } = mapLocality(viewer);
+    const where = bias
+      ? `&bias=${encodeURIComponent(bias)}`
+      : near ? `&near=${encodeURIComponent(near)}` : '';
     try {
       const response = await fetch(
-        `/api/geocode?q=${encodeURIComponent(text)}${bias ? `&bias=${encodeURIComponent(bias)}` : ''}`,
+        `/api/geocode?q=${encodeURIComponent(text)}${where}`,
         { signal: abortRef.current.signal }
       );
       if (!response.ok) {
