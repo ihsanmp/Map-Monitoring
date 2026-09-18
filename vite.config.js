@@ -2810,8 +2810,11 @@ let _nominatimLastCallAt = 0;
  * @returns {Array<number>|null} [south, west, north, east], or null.
  */
 export function parseGeocodeNear(raw) {
-  const parts = String(raw || '').split(',');
+  const parts = String(raw || '').split(',').map((part) => part.trim());
   if (parts.length !== 2) return null;
+  // Number('') is 0: an empty half would become the equator or the prime
+  // meridian, so each half must actually be a number before it is one.
+  if (!parts.every((part) => /^-?\d+(\.\d+)?$/.test(part))) return null;
   const lat = Number(parts[0]);
   const lon = Number(parts[1]);
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
@@ -2925,6 +2928,11 @@ export const GEOCODE_LOCAL_NICKNAMES = Object.freeze([
   ['concat', 'Condongcatur', 'jogja'],
   // Landmarks
   ['monjali', 'Monumen Jogja Kembali', 'jogja'],
+  // Bare "tugu" is Togo to a worldwide index - its name in several languages -
+  // and was returned even with the map framed on Yogyakarta. "tugu jogja" found
+  // the railway station. Both mean the monument when the map is over the city.
+  ['tugu', 'Tugu Pal Putih Yogyakarta', 'jogja'],
+  ['tugu jogja', 'Tugu Pal Putih Yogyakarta', 'jogja'],
   ['alkid', 'Alun-Alun Kidul Yogyakarta', 'jogja'],
   ['sarkem', 'Pasar Kembang Yogyakarta', 'jogja'],
 ]);
@@ -3707,7 +3715,10 @@ function nominatimProxy() {
             (variant) => geocodeNamePrefixMatch(row, variant),
           ) || geocodeNamePrefixMatch(row, query);
           const rankScore = (row) => Number(row.importance || 0)
-            + (inGeocodeBox(row, box) ? IN_VIEW_BONUS : 0)
+            // nameBox, not box: the same box this search was asked with. With
+            // only the camera point to go on, `box` is null and the preference
+            // the query was built around never reached the ordering.
+            + (inGeocodeBox(row, nameBox) ? IN_VIEW_BONUS : 0)
             + (bestPrefix(row) ? NAME_PREFIX_BONUS : 0)
             + COVERAGE_BONUS * bestCoverage(row);
           results = dedupeGeocodeHits(results).sort((a, b) => rankScore(b) - rankScore(a));

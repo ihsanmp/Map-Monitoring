@@ -16,6 +16,7 @@ import {
   geocodeNicknameExpansion,
   geocodeQueryVariants,
   parseGeocodeBias,
+  parseGeocodeNear,
 } from '../../vite.config.js';
 
 const JOGJA_VIEW = parseGeocodeBias('-7.90,110.25|-7.65,110.50');
@@ -91,4 +92,43 @@ test('every entry is a lowercase key mapping to a longer, different name', () =>
     seen.add(alias);
   }
   assert.ok(seen.size >= 15, 'the table is worth having');
+});
+
+test('tugu means the monument over Yogyakarta, and Togo stays reachable elsewhere', () => {
+  // Bare "tugu" returned the country of Togo even with the map framed on the
+  // city, and "tugu jogja" returned the railway station.
+  assert.equal(geocodeNicknameExpansion('tugu', JOGJA_VIEW), 'Tugu Pal Putih Yogyakarta');
+  assert.equal(geocodeNicknameExpansion('Tugu Jogja', JOGJA_VIEW), 'Tugu Pal Putih Yogyakarta');
+  const LOME_VIEW = parseGeocodeBias('6.05,1.10|6.25,1.35');
+  assert.equal(geocodeNicknameExpansion('tugu', LOME_VIEW), null, 'over Togo, Togo wins');
+  assert.equal(geocodeNicknameExpansion('tugu', PARIS_VIEW), null);
+});
+
+// ---------------------------------------------------------------------------
+// The camera point, used when the view is the whole globe
+// ---------------------------------------------------------------------------
+
+test('the camera point over Indonesia lets a Yogyakarta nickname apply', () => {
+  // The opening view is 4,200 km up over the Makassar Strait; its rectangle is
+  // the whole globe and is refused, so this point is all the search has.
+  const near = parseGeocodeNear('-2.5000,118.0000');
+  assert.ok(near, 'a real point makes a box');
+  assert.equal(geocodeNicknameExpansion('uii', near), 'Universitas Islam Indonesia');
+});
+
+test('the camera point over France does not', () => {
+  assert.equal(geocodeNicknameExpansion('uii', parseGeocodeNear('48.8566,2.3522')), null);
+});
+
+test('a camera point that is not a point is refused', () => {
+  // Number('') is 0: an empty half must not become the equator.
+  for (const raw of ['', '1', '1,2,3', 'a,b', ',118', '-2.5,', '91,118', '-2.5,181', null, undefined]) {
+    assert.equal(parseGeocodeNear(raw), null, String(raw));
+  }
+});
+
+test('the camera-point box stays on the planet near the poles and the antimeridian', () => {
+  const [south, west, north, east] = parseGeocodeNear('88,179');
+  assert.ok(north <= 90 && south >= -90 && east <= 180 && west >= -180);
+  assert.ok(north > south && east > west);
 });
