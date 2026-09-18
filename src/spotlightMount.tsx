@@ -20,6 +20,7 @@ import { lookupIdentifier, type LookupResult } from '@/lib/idLookup';
 import { summarizeWeather } from '@/weatherWords.js';
 import { placeRouteSummary } from '@/routeSummaryPlacement.js';
 import { searchLocality } from '@/searchLocality.js';
+import { spotlightPanel } from '@/spotlightPanel.js';
 import { applyPickedPlace } from '@/placeDots.js';
 import { createPlaceDots } from '@/placeDotsLayer.js';
 import '@/tailwind.css';
@@ -568,6 +569,8 @@ function SpotlightHost() {
   const [routeOpen, setRouteOpen] = useState(false);
   /** A phone/plate lookup, shown in place of place results when one matches. */
   const [lookup, setLookup] = useState<LookupResult | null>(null);
+  /** What is in the field now: a new query outranks the last answer's card. */
+  const [query, setQuery] = useState('');
   const rowsRef = useRef<GeocodeRow[]>([]);
   const debounceRef = useRef<number | undefined>(undefined);
   /** The query the debounce is holding, so Enter can run it without waiting. */
@@ -670,6 +673,7 @@ function SpotlightHost() {
   const onSearchChange = useCallback(
     (value: string) => {
       const text = value.trim();
+      setQuery(text);
       pendingQueryRef.current = text;
       window.clearTimeout(debounceRef.current);
 
@@ -871,6 +875,13 @@ function SpotlightHost() {
     dotsRef.current = null;
   }, []);
 
+  const panelKind = spotlightPanel({
+    routeOpen,
+    hasLookup: Boolean(lookup),
+    hasChosen: Boolean(chosen),
+    query,
+  });
+
   return (
     <AppleSpotlight
       isOpen
@@ -882,16 +893,21 @@ function SpotlightHost() {
       onSubmit={() => { void onSubmit(); }}
       emptyMessage={emptyMessage}
       panel={
-        routeOpen ? (
+        /*
+         * spotlightPanel.js decides. The one rule worth knowing here: a picked
+         * place's card steps aside while a new search is being typed, or its
+         * results would be hidden behind the answer to the previous one.
+         */
+        panelKind === 'route' ? (
           <RouteBar
             destination={chosen}
             onClose={closeRoute}
             pickRef={routePickRef}
             hasDots={dotCount > 0}
           />
-        ) : lookup ? (
+        ) : panelKind === 'lookup' && lookup ? (
           <LookupCard result={lookup} onClose={() => setLookup(null)} />
-        ) : chosen ? (
+        ) : panelKind === 'chosen' && chosen ? (
           /*
            * What the reference offers once a place is picked: the place, and
            * the way to it. The description panel it also shows is the one part
