@@ -13,6 +13,7 @@ import {
   keyAction,
   previewOutline,
   previewShape,
+  problemFor,
   relativeTime,
   shapeName,
   shapesToGeoJSON,
@@ -253,4 +254,52 @@ test('GeoJSON skips what cannot be drawn rather than writing broken geometry', (
   ]);
   assert.deepEqual(fc.features, []);
   assert.deepEqual(shapesToGeoJSON(undefined), { type: 'FeatureCollection', features: [] });
+});
+
+// ---------------------------------------------------------------------------
+// Shapes that cannot be measured
+// ---------------------------------------------------------------------------
+
+const BOWTIE = [P(-7.76, 110.36), P(-7.78, 110.38), P(-7.76, 110.38), P(-7.78, 110.36)];
+
+test('an area whose edges cross cannot be finished, by button, Enter or double-click', () => {
+  // It used to finish and be saved with the lobes cancelled: 223 m² for ~2 km².
+  const state = armed('area', ...BOWTIE);
+  assert.equal(canFinish(state), false);
+  assert.equal(keyAction('Enter', state), null);
+  const bar = actionBarModel(state);
+  assert.equal(bar.canFinish, false);
+  assert.match(bar.problem, /edges cross/);
+});
+
+test('the problem is said before the click that would cause it', () => {
+  // Three corners of a square, cursor on the far side: clicking there would
+  // make the edges cross, and the bar says so while the cursor is still moving.
+  const state = armed('area', P(-7.76, 110.36), P(-7.78, 110.38), P(-7.76, 110.38));
+  const warning = actionBarModel(state, P(-7.78, 110.36)).problem;
+  assert.match(warning, /edges cross/);
+  // The triangle so far is fine; only the spot under the cursor is not.
+  assert.match(warning, /^Not here: /);
+  assert.equal(canFinish(state), true, 'and the triangle can still be finished');
+  // North of the triangle: neither new edge reaches the diagonal.
+  assert.equal(actionBarModel(state, P(-7.75, 110.37)).problem, '', 'a good corner raises nothing');
+});
+
+test('corners in one line cannot be finished as an area', () => {
+  const state = armed('area', P(-7.77, 110.36), P(-7.77, 110.37), P(-7.77000001, 110.38));
+  assert.equal(canFinish(state), false);
+  assert.match(actionBarModel(state).problem, /one line/);
+});
+
+test('an unfinished shape is not a problem, only an unfinished one', () => {
+  // "needs at least three points" is what the prompt is for, not a warning.
+  assert.equal(problemFor(null), '');
+  assert.equal(problemFor({ kind: 'polygon', points: [P(-7.7, 110.3), P(-7.8, 110.4)] }), '');
+  assert.equal(actionBarModel(armed('area', JOGJA), EAST).problem, '');
+});
+
+test('an ordinary area still finishes', () => {
+  const square = armed('area', P(-7.76, 110.36), P(-7.76, 110.38), P(-7.78, 110.38), P(-7.78, 110.36));
+  assert.equal(canFinish(square), true);
+  assert.equal(actionBarModel(square).problem, '');
 });

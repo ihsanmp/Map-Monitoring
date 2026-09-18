@@ -95,11 +95,33 @@ export function previewOutline(state, cursor) {
   return points.length >= 2 ? points : [];
 }
 
-/** Whether a shape the operator controls the length of can be finished now. */
+/**
+ * Whether a shape the operator controls the length of can be finished now.
+ *
+ * Enough corners is not enough: a ring whose edges cross, or whose corners lie
+ * on one line, measures as nonsense. Finishing one used to either save it with
+ * a wrong area or throw it away without a word - so finishing is refused while
+ * that is true, and problemFor() says why.
+ */
 export function canFinish(state) {
   const mode = modeFor(state?.mode);
   if (!mode || state.complete || mode.exactPoints !== null) return false;
-  return (state.points?.length || 0) >= mode.minPoints;
+  if ((state.points?.length || 0) < mode.minPoints) return false;
+  return measureShape(toShape(state)).measurable;
+}
+
+/**
+ * Why this shape cannot be measured, in words for the operator - or '' when it
+ * can, or when it is simply not finished yet (that is what the prompt is for).
+ *
+ * @param {object|null} shape
+ * @returns {string}
+ */
+export function problemFor(shape) {
+  if (!shape) return '';
+  const measured = measureShape(shape);
+  if (measured.measurable || /^needs /.test(measured.reason)) return '';
+  return `Cannot measure: ${measured.reason}`;
 }
 
 /** Leave the tool entirely: nothing chosen, nothing half-drawn, clicks handed back. */
@@ -174,6 +196,15 @@ export function actionBarModel(state, cursor = null) {
     modeLabel: mode.label,
     prompt: nextClick(mode, count),
     measurement: measurementFor(previewShape(state, cursor)),
+    /*
+     * Shown in place of the measurement. Two different situations:
+     *   - the shape AS CLICKED cannot be measured -> "Cannot measure: ..."
+     *   - it can, but a click where the cursor is would break it -> "Not here: ..."
+     * The second is said before the click, so the corner can go elsewhere, and
+     * does not claim that the shape so far is wrong.
+     */
+    problem: problemFor(toShape(state))
+      || problemFor(previewShape(state, cursor)).replace(/^Cannot measure: /, 'Not here: '),
     canUndo: count > 0,
     // Only shapes the operator decides the length of have a Finish button; a box
     // and a radius finish themselves on the second click.

@@ -23,6 +23,7 @@ import {
   polygonAreaKm2,
   polygonPerimeterKm,
   shapeContains,
+  ringSelfIntersects,
 } from './measureGeometry.js';
 
 const P = (lat, lon) => ({ lat, lon });
@@ -247,4 +248,73 @@ test('the readouts never print NaN or a negative', () => {
     assert.doesNotMatch(formatArea(value), /NaN|-/, `area ${value}`);
     assert.doesNotMatch(formatDistance(value), /NaN|-/, `distance ${value}`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// Shapes that cannot be measured as drawn
+// ---------------------------------------------------------------------------
+
+test('a bow-tie is refused, not measured as the difference of its two lobes', () => {
+  // Measured in the app: a bow-tie visibly about 2 km² came back as 223 m²,
+  // because its two lobes wind in opposite directions and cancel.
+  const bowtie = [
+    { lat: -7.76, lon: 110.36 }, { lat: -7.78, lon: 110.38 },
+    { lat: -7.76, lon: 110.38 }, { lat: -7.78, lon: 110.36 },
+  ];
+  assert.equal(ringSelfIntersects(bowtie), true);
+  const measured = measureShape({ kind: 'polygon', points: bowtie });
+  assert.equal(measured.measurable, false);
+  assert.equal(measured.areaKm2, 0, 'no number that could be read as the answer');
+  assert.match(measured.reason, /edges cross/);
+});
+
+test('the same four corners in order are an ordinary square', () => {
+  const square = [
+    { lat: -7.76, lon: 110.36 }, { lat: -7.76, lon: 110.38 },
+    { lat: -7.78, lon: 110.38 }, { lat: -7.78, lon: 110.36 },
+  ];
+  assert.equal(ringSelfIntersects(square), false);
+  assert.equal(measureShape({ kind: 'polygon', points: square }).measurable, true);
+});
+
+test('a concave shape and a closing corner are not mistaken for a crossing', () => {
+  const notch = [
+    { lat: 0, lon: 0 }, { lat: 0, lon: 4 }, { lat: 4, lon: 4 },
+    { lat: 2, lon: 2 }, { lat: 4, lon: 0 }, { lat: 0, lon: 0 },
+  ];
+  assert.equal(ringSelfIntersects(notch), false);
+  assert.equal(ringSelfIntersects(notch.slice(0, 3)), false, 'a triangle cannot cross itself');
+});
+
+test('corners in one line enclose nothing and say so', () => {
+  // Three clicks along a street were saved as "Area 2 - 9 m²".
+  const line = [
+    { lat: -7.77, lon: 110.36 }, { lat: -7.77, lon: 110.37 }, { lat: -7.77000001, lon: 110.38 },
+  ];
+  const measured = measureShape({ kind: 'polygon', points: line });
+  assert.equal(measured.measurable, false);
+  assert.match(measured.reason, /one line/);
+});
+
+test('a real thin strip is still an area', () => {
+  // About 10 m wide and 1 km long: a road, which is a thing people measure.
+  const strip = [
+    { lat: -7.77, lon: 110.36 }, { lat: -7.77, lon: 110.369 },
+    { lat: -7.77009, lon: 110.369 }, { lat: -7.77009, lon: 110.36 },
+  ];
+  const measured = measureShape({ kind: 'polygon', points: strip });
+  assert.equal(measured.measurable, true);
+  assert.ok(measured.areaKm2 > 0.005 && measured.areaKm2 < 0.02, String(measured.areaKm2));
+});
+
+test('two box corners on one pixel row make a sliver, and a sliver is refused', () => {
+  // Measured in the app: 3,988 m by 1.43 m, saved as "Box 1 - 5,717 m²" under
+  // the first threshold.
+  const sliver = [
+    { lat: -7.780963, lon: 110.36 }, { lat: -7.780963, lon: 110.3962 },
+    { lat: -7.7809759, lon: 110.3962 }, { lat: -7.7809759, lon: 110.36 },
+  ];
+  const measured = measureShape({ kind: 'box', points: sliver });
+  assert.equal(measured.measurable, false);
+  assert.match(measured.reason, /one line/);
 });

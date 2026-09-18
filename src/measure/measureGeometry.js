@@ -313,15 +313,98 @@ export function measureShape(shape) {
       // the Pacific.
       return none('crosses the antimeridian', points.length);
     }
+    /*
+     * A ring whose edges cross is not one shape, and its "area" is not an area.
+     *
+     * The two lobes of a bow-tie wind in opposite directions, so the signed
+     * formula cancels them: measured in the app, a bow-tie visibly about 2 km²
+     * across was reported as 223 m². Refused, with the reason, so the operator
+     * re-clicks the corners in order instead of trusting the number.
+     */
+    if (ringSelfIntersects(points)) {
+      return none('its edges cross each other', points.length);
+    }
+    const areaKm2 = polygonAreaKm2(points);
+    const perimeterKm = polygonPerimeterKm(points);
+    /*
+     * Corners in (almost) one line enclose nothing.
+     *
+     * Three clicks along a street were saved as "Area 2 - 9 m²": a sliver whose
+     * area is rounding noise. Judged by shape rather than by size, so a real
+     * thin strip - a 10 m wide road a kilometre long - still counts: this is
+     * the isoperimetric ratio 4*pi*A/P², 1 for a circle, about 0.03 for that
+     * road, and about 0.00003 for the three clicks along a line. See
+     * DEGENERATE_RATIO for where the line is drawn.
+     */
+    if (perimeterKm > 0 && (4 * Math.PI * areaKm2) / (perimeterKm * perimeterKm) < DEGENERATE_RATIO) {
+      return none('its corners lie on one line, so it encloses nothing', points.length);
+    }
     return {
-      areaKm2: polygonAreaKm2(points),
-      perimeterKm: polygonPerimeterKm(points),
+      areaKm2,
+      perimeterKm,
       vertices: points.length,
       measurable: true,
       reason: '',
     };
   }
   return none('unknown shape');
+}
+
+/**
+ * Below this isoperimetric ratio a polygon is a line, not an area.
+ *
+ * For a long thin shape the ratio is about pi * width / length, so this refuses
+ * anything more than about 1,000 times longer than it is wide - one side under
+ * a pixel on any screen it could have been drawn on. Measured: two box corners
+ * clicked on the same pixel row made a 3,988 m by 1.43 m sliver (0.0011), which
+ * the first threshold of 0.001 let through as "Box 1 - 5,717 m²". A 10 m wide,
+ * 1 km long road scores 0.031 and three clicks along one street 0.00003.
+ */
+export const DEGENERATE_RATIO = 0.003;
+
+/** Signed area of the triangle a-b-c in lon/lat: positive left turn, negative right, 0 in line. */
+function orient(a, b, c) {
+  return (b.lon - a.lon) * (c.lat - a.lat) - (b.lat - a.lat) * (c.lon - a.lon);
+}
+
+/** Do segments p1-p2 and q1-q2 cross at a point interior to both? */
+function segmentsCross(p1, p2, q1, q2) {
+  const d1 = orient(q1, q2, p1);
+  const d2 = orient(q1, q2, p2);
+  const d3 = orient(p1, p2, q1);
+  const d4 = orient(p1, p2, q2);
+  return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0))
+    && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
+}
+
+/**
+ * Does any edge of this ring cross another?
+ *
+ * Planar in lon/lat, which is exact enough at the scale anyone draws by hand;
+ * shapes across the antimeridian are refused before this is asked. Neighbouring
+ * edges share a corner and are not compared. A repeated closing vertex is
+ * ignored, the same as everywhere else in this module.
+ *
+ * @param {Array<{lat:number, lon:number}>} points
+ * @returns {boolean}
+ */
+export function ringSelfIntersects(points) {
+  const ring = normalizeRing(points);
+  const first = ring[0];
+  const last = ring[ring.length - 1];
+  if (ring.length > 1 && first.lat === last.lat && first.lon === last.lon) ring.pop();
+  const n = ring.length;
+  if (n < 4) return false; // a triangle cannot cross itself
+  for (let i = 0; i < n; i += 1) {
+    const a1 = ring[i];
+    const a2 = ring[(i + 1) % n];
+    for (let j = i + 1; j < n; j += 1) {
+      // Skip the edge itself and its two neighbours, which meet it at a corner.
+      if (j === i || (j + 1) % n === i || (i + 1) % n === j) continue;
+      if (segmentsCross(a1, a2, ring[j], ring[(j + 1) % n])) return true;
+    }
+  }
+  return false;
 }
 
 /** Is a point inside a shape? Paths enclose nothing, so always false. */

@@ -4563,6 +4563,18 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
   color: #86efac;
 }
 
+/* Amber, not red: the shape is not broken, it just cannot be measured as drawn. */
+.draw-actionbar-problem {
+  padding-left: 10px;
+  border-left: 1px solid rgba(255, 255, 255, 0.14);
+  color: #ffd97a;
+  font-size: 12px;
+}
+
+.draw-live-keys.draw-live-problem {
+  color: #ffd97a;
+}
+
 .draw-actionbar-points {
   margin-left: auto;
   color: var(--text-dim);

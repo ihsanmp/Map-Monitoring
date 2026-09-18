@@ -41,6 +41,7 @@ import {
 import {
   SHAPE_COLORS,
   actionBarModel,
+  canFinish,
   cancel,
   circleRing,
   isTypingTarget,
@@ -282,6 +283,7 @@ export function initDrawingTools({ viewer, dataManager, container = null }) {
       <span class="draw-actionbar-mode" data-bar-mode></span>
       <span class="draw-actionbar-prompt" data-bar-prompt></span>
       <span class="draw-actionbar-measure" data-bar-measure></span>
+      <span class="draw-actionbar-problem" data-bar-problem hidden></span>
     </div>
     <div class="draw-actionbar-row">
       <button type="button" data-bar-action="undo">&#8630; Undo point</button>
@@ -295,6 +297,7 @@ export function initDrawingTools({ viewer, dataManager, container = null }) {
     mode: bar.querySelector('[data-bar-mode]'),
     prompt: bar.querySelector('[data-bar-prompt]'),
     measure: bar.querySelector('[data-bar-measure]'),
+    problem: bar.querySelector('[data-bar-problem]'),
     undo: bar.querySelector('[data-bar-action="undo"]'),
     finish: bar.querySelector('[data-bar-action="finish"]'),
     finishLabel: bar.querySelector('[data-bar-finish-label]'),
@@ -434,7 +437,15 @@ export function initDrawingTools({ viewer, dataManager, container = null }) {
   }
 
   // ── Panel and bar ────────────────────────────────────────────────────────
-  function renderBar() {
+  /**
+   * @param {object} [options]
+   * @param {boolean} [options.reposition=true] Re-measure the search bar and move
+   *   under it. Off for cursor moves: reading layout straight after writing the
+   *   bar's text forces a synchronous reflow, and doing that every animation
+   *   frame on a slow machine buys nothing - the search bar does not move
+   *   because the mouse did.
+   */
+  function renderBar({ reposition = true } = {}) {
     const model = actionBarModel(session, cursor);
     bar.hidden = !model.visible;
     if (!model.visible) return;
@@ -442,14 +453,19 @@ export function initDrawingTools({ viewer, dataManager, container = null }) {
     barUi.mode.textContent = model.modeLabel;
     barUi.prompt.textContent = model.prompt;
     barUi.measure.textContent = model.measurement;
-    barUi.measure.hidden = !model.measurement;
+    barUi.measure.hidden = !model.measurement || Boolean(model.problem);
+    // The reason replaces the number: a number next to "cannot measure" would
+    // still be read as the answer.
+    barUi.problem.textContent = model.problem;
+    barUi.problem.hidden = !model.problem;
     barUi.undo.disabled = !model.canUndo;
     barUi.finish.hidden = !model.showFinish;
     barUi.finish.disabled = !model.canFinish;
     barUi.finishLabel.textContent = model.finishLabel;
     barUi.points.textContent = model.pointsLabel;
+    if (!reposition) return;
     // Below the search bar, which owns the top centre of the screen; its height
-    // changes with whatever panel it is showing, so it is measured each time.
+    // changes with whatever panel it is showing, so it is measured on each click.
     const pill = document.querySelector('#spotlight-root .mm-spotlight-pill');
     const below = pill ? pill.getBoundingClientRect().bottom : 0;
     bar.style.top = `${Math.max(88, Math.round(below) + 12)}px`;
@@ -492,8 +508,9 @@ export function initDrawingTools({ viewer, dataManager, container = null }) {
     if (model.visible) {
       const count = session.points.length;
       ui.livePoints.textContent = `${count} ${count === 1 ? 'point' : 'points'}`;
-      ui.liveMeasure.textContent = model.measurement;
-      ui.liveKeys.textContent = model.keyHint;
+      ui.liveMeasure.textContent = model.problem ? '' : model.measurement;
+      ui.liveKeys.textContent = model.problem || model.keyHint;
+      ui.liveKeys.classList.toggle('draw-live-problem', Boolean(model.problem));
     }
 
     if (inside.total > 0) {
@@ -566,6 +583,15 @@ export function initDrawingTools({ viewer, dataManager, container = null }) {
   }
 
   function doFinish() {
+    /*
+     * Refused while the shape cannot be measured - edges that cross, corners on
+     * one line. It used to be finished anyway and then either saved with a
+     * wrong area or discarded without a word. The bar is already saying why.
+     */
+    if (!canFinish(session)) {
+      render();
+      return;
+    }
     const finished = finish(session);
     if (finished === session) return; // below the minimum — nothing to finish
     session = finished;
@@ -611,6 +637,18 @@ export function initDrawingTools({ viewer, dataManager, container = null }) {
     const before = session;
     session = addPoint(session, point);
     if (session === before) return; // a miss, or a repeat of the last point
+    /*
+     * A box finishes itself on its second click. If that click makes a shape
+     * with no area - both corners on one line of latitude or longitude - the
+     * click is taken back rather than finished and silently thrown away. The
+     * cursor stays on it, so the bar shows the reason.
+     */
+    if (session.complete && !measureShape(toShape(session)).measurable) {
+      session = before;
+      cursor = point;
+      render();
+      return;
+    }
     if (session.points.length === 1) anchorHeight = point.height || 0;
     cursor = point;
     recount();
@@ -641,8 +679,11 @@ export function initDrawingTools({ viewer, dataManager, container = null }) {
     if (!point) return;
     cursor = point;
     updatePreview();
-    renderBar();
-    ui.liveMeasure.textContent = actionBarModel(session, cursor).measurement;
+    renderBar({ reposition: false });
+    const moving = actionBarModel(session, cursor);
+    ui.liveMeasure.textContent = moving.problem ? '' : moving.measurement;
+    ui.liveKeys.textContent = moving.problem || moving.keyHint;
+    ui.liveKeys.classList.toggle('draw-live-problem', Boolean(moving.problem));
     governorRequestRender('drawing-tools');
   };
   handler.setInputAction((movement) => {
